@@ -48,22 +48,23 @@ public class UserService {
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
     }
-    
+
     @Transactional
     public UserResponseDTO updateUser(Long id, UserRequestDTO requestDTO) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado con ID: " + id));
-        
-        // Verificar si el email ya existe en otro usuario
-        if (!user.getEmail().equals(requestDTO.getEmail()) && 
-            userRepository.existsByEmail(requestDTO.getEmail())) {
+
+        boolean emailExists = userRepository.existsByEmail(requestDTO.getEmail());
+
+
+        if (emailExists && !user.getEmail().equals(requestDTO.getEmail())) {
             throw new RuntimeException("Ya existe un usuario con el email: " + requestDTO.getEmail());
         }
-        
+
         user.setName(requestDTO.getName());
         user.setEmail(requestDTO.getEmail());
         user.setPhoneNumber(requestDTO.getPhoneNumber());
-        
+
         User updatedUser = userRepository.save(user);
         log.info("Updated user with id: {}", updatedUser.getId());
         return convertToDTO(updatedUser);

@@ -16,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
@@ -75,25 +76,106 @@ class ReservationServiceTest {
         testReservation.setStatus(Reservation.ReservationStatus.ACTIVE);
         testReservation.setCreatedAt(LocalDateTime.now());
     }
-    
+
     @Test
     void testCreateReservation_Success() {
-        // TODO: Implementar el test de creación de reserva exitosa
+        ReservationRequestDTO request = new ReservationRequestDTO();
+        request.setUserId(1L);
+        request.setBookExternalId(258027L);
+        request.setRentalDays(7);
+        request.setStartDate(LocalDate.now());
+
+        when(userService.getUserEntity(1L)).thenReturn(testUser);
+        when(bookRepository.findByExternalId(258027L)).thenReturn(Optional.of(testBook));
+        when(reservationRepository.save(any(Reservation.class))).thenAnswer(invocation -> {
+            Reservation r = invocation.getArgument(0);
+            r.setId(1L);
+            r.setCreatedAt(LocalDateTime.now());
+            return r;
+        });
+
+        ReservationResponseDTO result = reservationService.createReservation(request);
+
+        assertNotNull(result);
+        assertEquals(1L, result.getUserId());
+        assertEquals(258027L, result.getBookExternalId());
+        assertEquals(7, result.getRentalDays());
+        assertEquals(new BigDecimal("15.99"), result.getDailyRate());
+
+        BigDecimal expectedTotal = new BigDecimal("15.99")
+                .multiply(BigDecimal.valueOf(7))
+                .setScale(2, RoundingMode.HALF_UP);
+        assertEquals(expectedTotal, result.getTotalFee());
+
+        verify(bookService, times(1)).decreaseAvailableQuantity(258027L);
     }
-    
+
     @Test
     void testCreateReservation_BookNotAvailable() {
-        // TODO: Implementar el test de creación de reserva cuando el libro no está disponible
+        ReservationRequestDTO request = new ReservationRequestDTO();
+        request.setUserId(1L);
+        request.setBookExternalId(258027L);
+        request.setRentalDays(7);
+        request.setStartDate(LocalDate.now());
+
+        testBook.setAvailableQuantity(0);
+
+        when(userService.getUserEntity(1L)).thenReturn(testUser);
+        when(bookRepository.findByExternalId(258027L)).thenReturn(Optional.of(testBook));
+
+        assertThrows(RuntimeException.class, () -> {
+            reservationService.createReservation(request);
+        });
+
+        verify(bookService, never()).decreaseAvailableQuantity(anyLong());
     }
-    
+
     @Test
     void testReturnBook_OnTime() {
-        // TODO: Implementar el test de devolución de libro en tiempo
+        LocalDate expectedReturn = LocalDate.now().plusDays(7);
+        testReservation.setExpectedReturnDate(expectedReturn);
+
+        ReturnBookRequestDTO returnRequest = new ReturnBookRequestDTO();
+        returnRequest.setReturnDate(expectedReturn); // en tiempo
+
+        when(reservationRepository.findById(1L)).thenReturn(Optional.of(testReservation));
+        when(reservationRepository.save(any(Reservation.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ReservationResponseDTO result = reservationService.returnBook(1L, returnRequest);
+
+        assertNotNull(result);
+        assertEquals(expectedReturn, result.getActualReturnDate());
+        assertEquals(BigDecimal.ZERO, result.getLateFee());
+        assertEquals(Reservation.ReservationStatus.RETURNED, result.getStatus());
+
+        verify(bookService, times(1)).increaseAvailableQuantity(258027L);
     }
-    
+
+
     @Test
     void testReturnBook_Overdue() {
-        // TODO: Implementar el test de devolución de libro con retraso
+        // devuelto hace 3 días
+        LocalDate expectedReturn = LocalDate.now().minusDays(3);
+        testReservation.setExpectedReturnDate(expectedReturn);
+
+        ReturnBookRequestDTO returnRequest = new ReturnBookRequestDTO();
+        LocalDate returnDate = LocalDate.now(); // hoy, 3 días despues
+        returnRequest.setReturnDate(returnDate);
+
+        when(reservationRepository.findById(1L)).thenReturn(Optional.of(testReservation));
+        when(reservationRepository.save(any(Reservation.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ReservationResponseDTO result = reservationService.returnBook(1L, returnRequest);
+
+        assertNotNull(result);
+        assertEquals(returnDate, result.getActualReturnDate());
+
+
+        BigDecimal expectedLateFee = new BigDecimal("7.20");
+        assertEquals(expectedLateFee, result.getLateFee());
+        assertEquals(Reservation.ReservationStatus.OVERDUE, result.getStatus());
+
+        verify(bookService, times(1)).increaseAvailableQuantity(258027L);
     }
     
     @Test
